@@ -244,6 +244,10 @@ export function allFixedAbsorberIndex(
   return -1
 }
 
+/** A minimized zone, seen from a split that runs ACROSS its parent: its strip
+ *  is thin only along its parent's axis, so it sizes nothing on this one. */
+const foldedAcross = (child: LayoutNode): boolean => child.type === 'group' && Boolean(child.minimized)
+
 export function fixedTrackSize(node: LayoutNode, axis: 'row' | 'column', ctx: TrackContext): string | null {
   if (node.type === 'group') {
     // Ancestor splits must size a minimized zone as its strip, not as its
@@ -299,18 +303,23 @@ export function fixedTrackSize(node: LayoutNode, axis: 'row' | 'column', ctx: Tr
   }
 
   const visible = node.children.filter(child => !subtreeGone(child, ctx))
-  const sizes = visible.map(child => fixedTrackSize(child, axis, ctx))
 
-  if (node.orientation === axis) {
-    if (sizes.length === 0 || sizes.some(size => size === null)) {
-      return null
-    }
-
-    return sizes.length === 1 ? sizes[0] : `calc(${sizes.join(' + ')})`
+  if (node.orientation !== axis) {
+    // Across the axis a flex child just stretches; the fixed ones set the size.
+    // A zone minimized in THIS split folded along this split's axis, not the
+    // one being measured: across it, its rail stretches like a flex child. Bot
+    // Mode's Routines rail (28px wide, beside the workspace at the top of a
+    // column) used to make the whole row a 1.75rem-tall track here.
+    return cssMax(visible.filter(child => !foldedAcross(child)).map(child => fixedTrackSize(child, axis, ctx))) ?? null
   }
 
-  // Across the axis a flex child just stretches; the fixed ones set the size.
-  return cssMax(sizes) ?? null
+  const sizes = visible.map(child => fixedTrackSize(child, axis, ctx))
+
+  if (sizes.length === 0 || sizes.some(size => size === null)) {
+    return null
+  }
+
+  return sizes.length === 1 ? sizes[0] : `calc(${sizes.join(' + ')})`
 }
 
 /**
@@ -380,7 +389,8 @@ export function edgeFixedZone(
   }
 
   // Cross-axis: every child touches the edge — the first fixed one owns it.
-  for (const child of visible) {
+  // A minimized rail is not fixed along this axis (see fixedTrackSize).
+  for (const child of visible.filter(c => !foldedAcross(c))) {
     const zone = edgeFixedZone(child, edge, axis, ctx)
 
     if (zone) {
